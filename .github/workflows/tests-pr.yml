@@ -11,8 +11,7 @@ name: PR Tests
 
 on:
   pull_request:
-    # pull_request trigger includes fork PRs by default
-    types: [opened, synchronize, reopened]
+  merge_group:
 
 env:
   # Simulates Shopify's secrets — empty for fork PRs (GitHub security model)
