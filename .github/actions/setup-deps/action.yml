@@ -1,0 +1,28 @@
+# =============================================================================
+# LEGITIMATE composite action — this is what the VICTIM repo has
+# It simply sets up Node.js and installs dependencies
+# =============================================================================
+name: "Setup Dependencies"
+description: "Install Node.js and project dependencies"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - name: Install dependencies
+      run: |
+        echo "[setup-deps] Installing dependencies..."
+        npm install --frozen-lockfile 2>/dev/null || npm ci 2>/dev/null || npm install
+        echo "[setup-deps] Dependencies installed successfully."
+      shell: bash
+
+    - name: Verify installation
+      run: |
+        echo "[setup-deps] Node version: $(node --version)"
+        echo "[setup-deps] NPM version: $(npm --version)"
+        echo "[setup-deps] Setup complete."
+      shell: bash

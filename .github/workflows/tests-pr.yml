@@ -1,0 +1,90 @@
+# =============================================================================
+# VULNERABLE WORKFLOW — Simulates Shopify/cli tests-pr.yml
+# =============================================================================
+# BUG: This workflow checks out code from the FORK (pull_request head),
+#      then runs a composite action from that checked-out code.
+#      An attacker who forks this repo can modify the composite action
+#      to execute arbitrary code on the CI runner.
+# =============================================================================
+
+name: PR Tests
+
+on:
+  pull_request:
+    # pull_request trigger includes fork PRs by default
+    types: [opened, synchronize, reopened]
+
+env:
+  # Simulates Shopify's secrets — empty for fork PRs (GitHub security model)
+  # but GITHUB_TOKEN (read-only) is always available
+  GH_TOKEN: ${{ secrets.SHOPIFY_GH_READ_CONTENT_TOKEN }}
+  GH_TOKEN_SHOP: ${{ secrets.SHOP_GH_READ_CONTENT_TOKEN }}
+
+jobs:
+  setup-and-test:
+    name: "Build & Test"
+    runs-on: ubuntu-latest
+    steps:
+      # =====================================================================
+      # VULNERABILITY: Checks out the fork's code, not the base branch
+      # This is the exact pattern from Shopify/cli tests-pr.yml
+      # =====================================================================
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.event.repository.full_name }}
+          ref: ${{ github.event.pull_request.head.ref || github.event.merge_group.head_ref }}
+
+      # =====================================================================
+      # VULNERABILITY: Loads composite action from the CHECKED-OUT fork code
+      # The attacker's modified action.yml executes instead of the original
+      # =====================================================================
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-deps  # <-- THIS RUNS ATTACKER CODE
+
+      - name: Run type-check
+        run: npm run type-check || echo "type-check not configured"
+
+      - name: Run lint
+        run: npm run lint || echo "lint not configured"
+
+      - name: Run tests
+        run: npm test || echo "tests not configured"
+
+  knip-check:
+    name: "Dead Code Check (Knip)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-deps
+
+      # =====================================================================
+      # VULNERABILITY: Executes JavaScript from the fork's code directly
+      # =====================================================================
+      - name: Run Knip
+        run: node bin/run-knip-ci.js  # <-- ATTACKER-CONTROLLED JS FILE
+
+  # Simulates the E2E job that runs with secrets for internal PRs
+  e2e-tests:
+    name: "E2E Tests (internal only)"
+    runs-on: ubuntu-latest
+    # Only runs for internal PRs (not forks) — secrets are available here
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup
+        uses: ./.github/actions/setup-deps
+
+      - name: Run E2E
+        env:
+          E2E_ACCOUNT_EMAIL: ${{ secrets.E2E_ACCOUNT_EMAIL }}
+          E2E_ACCOUNT_PASSWORD: ${{ secrets.E2E_ACCOUNT_PASSWORD }}
+        run: echo "Running E2E tests with real credentials..."
